@@ -1,4 +1,6 @@
 import process_mlb
+import numpy as np
+
 class Graph:
     def __init__(self,nodes,edge_dict):
         self.nodes=nodes
@@ -10,7 +12,7 @@ class Graph:
             self.edge_list[edge[0]].append(edge[1])
             self.edge_list[edge[1]].append(edge[0])
     #Returns all triads that involve the given node
-    def get_all_weighted_triads(self,node):
+    def get_weighted_triads(self,node):
         triads=[]
         already_seen={}
         for neigh1 in self.edge_list[node]:
@@ -26,7 +28,7 @@ class Graph:
     # (node->neigh1, node->neigh2, neigh2->node), note that there are repeats because we make edges in both directions.
     #e.g. (False, False, False) which is node loses to neigh1 loses to neigh2 loses to node is the same as (True,True,True)
     #Which is node beats neigh2 beats neigh1 beats node
-    def get_all_unweighted_triads(self,node):
+    def get_unweighted_triads(self,node):
         weighted_triads=self.get_weighted_triads(node)
         unweighted_triads={}
         for triad in weighted_triads:
@@ -35,9 +37,9 @@ class Graph:
             signs=(triad[0]>0,triad[1]>0,triad[2]>0)
             unweighted_triads[signs]=unweighted_triads.get(signs,0)+1
         return unweighted_triads
-        
+
     #Does this for the whole graph
-    def get_weighted_triads(self):
+    def get_all_weighted_triads(self):
         triads=[]
         for node in self.nodes:
             triads.append(self.get_weighted_triads(node))
@@ -48,8 +50,38 @@ class Graph:
         for node in self.nodes:
             t=self.get_unweighted_triads(node)
             for k1,k2,k3 in t:
-                triads[(k1,k2,k3)]+=t[(k1,k2,k3)]
+                triads[(k1,k2,k3)]=triads.get((k1,k2,k3),0)+t[(k1,k2,k3)]
         return triads
+    
+    def get_unweighted_attrs_and_labels(self):
+        triads=self.get_all_unweighted_triads()
+        attrs=np.zeros((len(triads),2))
+        labels=np.zeros((len(triads)))
+        weights=np.zeros((len(triads)))
+        i=0
+        for triad in triads:
+            attrs[i,0]=1*triad[0]
+            attrs[i,1]=1*triad[1]
+            labels[i]=1*triad[2]
+            weights[i]=triads[triad]
+            i+=1
+        return (attrs,labels,weights)
+
+    def get_weighted_partial_triads(self,node1,node2):
+        partial=[]
+        for neigh in self.edge_list[node1]:
+            if node2 in self.edge_list[neigh]:
+                    partial.append((self.edge_dict[(node1,neigh)],self.edge_dict[(neigh,node2)]))
+        return partial
+
+    def get_unweighted_partial_triads(self,node1,node2):
+        partial=[]
+        for neigh in self.edge_list[node1]:
+            if node2 in self.edge_list[neigh]:
+                if self.edge_dict[(node1,neigh)]!=0 and self.edge_dict[(neigh,node2)]!=0:
+                    partial.append((self.edge_dict[(node1,neigh)]>0,self.edge_dict[(neigh,node2)]>0))
+        return partial
+
 def build_graph(data_folder):
     (nodes,edge_dict)=process_mlb.read_folder(data_folder)
     return Graph(nodes,edge_dict)
@@ -57,4 +89,5 @@ def build_graph(data_folder):
 
 if __name__=='__main__':
     graph=build_graph('data/mlb/2015')
+    print graph.get_unweighted_partial_triads('NYY','BOS')
     print graph.get_all_unweighted_triads()
