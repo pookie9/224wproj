@@ -103,8 +103,40 @@ def rankingTest():
     testGraph.AddEdge(4, 6)
 
     nodeRanking = ranking(testGraph, 0.6)
+    print "Toy graph results"
+    print "================="
     print nodeRanking
     print rankingEvaluation(testGraph, nodeRanking)
+
+    import process_mlb
+    mlbGraph = snap.TNEANet.New()
+    (nodes, edgeDict) = process_mlb.read_folder('data/mlb/2015')
+
+    for i in range(len(nodes)):
+        mlbGraph.AddNode(i)
+
+    print edgeDict
+    for edge in edgeDict:
+        if edgeDict[edge] > 0:
+            # the first team in the edge won the series, so create edge second -> first
+            srcNodeID = nodes.index(edge[1])
+            dstNodeID = nodes.index(edge[0])
+            mlbGraph.AddEdge(srcNodeID, dstNodeID)
+
+        elif edgeDict[edge] < 0:
+            # the second team in the edge won the series, so create edge first -> second
+            srcNodeID = nodes.index(edge[0])
+            dstNodeID = nodes.index(edge[1])
+            mlbGraph.AddEdge(srcNodeID, dstNodeID)
+
+    mlbRanking = ranking(mlbGraph, 0.6)
+    evaluation = rankingEvaluation(mlbGraph, mlbRanking)
+
+    print ""
+    print "MLB graph results"
+    print "================="
+    print [nodes[i] for i in mlbRanking]
+    print evaluation
 
 if __name__ == "__main__":
     rankingTest()
