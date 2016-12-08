@@ -1,5 +1,7 @@
 import snap
+import process_mlb
 import random
+import syntheticgraph
 
 def randomShuffle(nodes, graph, edgeAttrs):
     random.shuffle(nodes)
@@ -16,7 +18,7 @@ def winLossSpread(nodes, graph, edgeAttrs):
             diffs[node] -= edgeAttrs[edge]
     return sorted(diffs, key=lambda nodeID: diffs[nodeID], reverse=True)
 
-def ranking(graph, alpha, tiebreaker=randomShuffle, edgeAttrs=None):
+def ranking(graph, alpha=0.6, tiebreaker=randomShuffle, edgeAttrs=None):
     """
     Implements the node ranking algorithm described by Guo, Yang, and Zhou
 
@@ -142,32 +144,20 @@ def rankingTest():
     print nodeRanking
     print rankingEvaluation(testGraph, nodeRanking)
 
-    import process_mlb
     mlbGraph = snap.TNGraph.New()
     (nodes, edgeDict) = process_mlb.read_folder('data/mlb/2015')
     #print nodes
     #print [ game for game in edgeDict if game[0] == "OAK" or game[1] == "OAK" ]
-    print edgeDict
 
     for i in range(len(nodes)):
         mlbGraph.AddNode(i)
 
-    modifiedEdgeDict = {}
+    # Take only the edges with positive weight, representing team1 beating team2
+    edgeDict = { edge : edgeDict[edge] for edge in edgeDict if edgeDict[edge] > 0}
     for edge in edgeDict:
-        if edgeDict[edge] > 0:
-            # the first team in the edge won the series, so create edge second -> first
-            srcNodeID = nodes.index(edge[1])
-            dstNodeID = nodes.index(edge[0])
-            mlbGraph.AddEdge(srcNodeID, dstNodeID)
-            modifiedEdgeDict[(srcNodeID, dstNodeID)] = edgeDict[edge]
-
-        elif edgeDict[edge] < 0:
-            # the second team in the edge won the series, so create edge first -> second
-            srcNodeID = nodes.index(edge[0])
-            dstNodeID = nodes.index(edge[1])
-            mlbGraph.AddEdge(srcNodeID, dstNodeID)
-            modifiedEdgeDict[(srcNodeID, dstNodeID)] = -1 * edgeDict[edge]
-    #print modifiedEdgeDict
+        srcNodeID = nodes.index(edge[1])
+        dstNodeID = nodes.index(edge[0])
+        mlbGraph.AddEdge(srcNodeID, dstNodeID)
 
     print ""
     print "MLB graph results (random)"
@@ -187,12 +177,17 @@ def rankingTest():
     for alpha10 in range(1, 10):
         alpha = alpha10 * 0.1
         print "alpha:", alpha
-        mlbRanking = ranking(mlbGraph, alpha, winLossSpread, modifiedEdgeDict)
+        mlbRanking = ranking(mlbGraph, alpha, winLossSpread, edgeDict)
         evaluation = rankingEvaluation(mlbGraph, mlbRanking)
 
         print [nodes[i] for i in mlbRanking]
         print evaluation
         print ""
+
+    synthGraph = syntheticgraph.generateSyntheticGraph(1000, alpha = 0.8)
+    synthRanking = ranking(synthGraph)
+    evaluation = rankingEvaluation(synthGraph, synthRanking)
+    print evaluation
 
 if __name__ == "__main__":
     rankingTest()

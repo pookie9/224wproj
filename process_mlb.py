@@ -1,37 +1,52 @@
 import os
-#Takes in the file name, returns a dict of weighted edges. Each key i s a 2 tuple of the two teams with the first one alphabetically first the value is how much the first team in the key won the series by (games that is).
-def read_file(f_name):
-    f=open(f_name,'r')
-    edges={}
-    first=True
+
+def read_folder(folderName):
+    """
+    Processes the MLB CSV files located in folderName
+
+    Args:
+        folderName: the relative filepath to the CSV directory
+
+    Returns:
+        teams: a list of the team names
+        edges: a dictionary of (team1, team2) -> w/l where w/l is the number of times
+            team 1 beat team 2 minus the number of times team 2 beat team 1
+    """
+    edges = {}
+    teams = []
+    for filename in os.listdir(folderName):
+        teams.append(filename.split('_')[1])
+        filepath = folderName + "/" + filename
+        edges.update(read_file(filepath))
+    return teams, edges
+
+def read_file(filename):
+    """
+    Processes the CSV file located as filename
+
+    Args:
+        filename: the relative filepath to the CSV file
+
+    Returns:
+        edges: a dictionary of (team1, team2) -> w/l as described above
+    """
+    f = open(filename, 'r')
+    edges = {}
     for line in f:
-        if line.strip()=='':
+        line = line.strip()
+        if line == '':
             continue
-        line=line.strip().split(',')
-        team1=line[4]
-        team2=line[6]
-        if team1=='Tm':
+
+        lineComponents = line.split(",")
+        team1 = lineComponents[4]
+        team2 = lineComponents[6]
+
+        if team1 == "Tm":
             continue
-        if team1<team2:
-            t=team1
-            team1=team2
-            team2=t
-        win=(line[7].strip()=='W')
-        if win:
-            win=-1
-        else:
-            win=1
-        edges[(team1,team2)]=edges.get((team1,team2),0)+win
-        edges[(team2,team1)]=edges.get((team2,team1),0)-win
-    #    return [(t1,t2,edges[(t1,t2)]) for t1,t2 in edges]
+
+        win = 1 if "W" in lineComponents[7] else -1
+        edges[(team1, team2)] = edges.get((team1, team2), 0) + win
     return edges
-def read_folder(folder_name):
-    edges={}
-    teams=[]
-    for f in os.listdir(folder_name):
-        teams.append(f.split('_')[1])
-        edges.update(read_file(folder_name+'/'+f))
-    return (teams,edges)
 
 if __name__=='__main__':
     (teams,edges)=read_folder('data/mlb/2015')
