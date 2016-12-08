@@ -1,6 +1,7 @@
 import snap
 import process_mlb
 import random
+import syntheticgraph
 
 def randomShuffle(nodes, graph, edgeAttrs):
     random.shuffle(nodes)
@@ -17,7 +18,7 @@ def winLossSpread(nodes, graph, edgeAttrs):
             diffs[node] -= edgeAttrs[edge]
     return sorted(diffs, key=lambda nodeID: diffs[nodeID], reverse=True)
 
-def ranking(graph, alpha, tiebreaker=randomShuffle, edgeAttrs=None):
+def ranking(graph, alpha=0.6, tiebreaker=randomShuffle, edgeAttrs=None):
     """
     Implements the node ranking algorithm described by Guo, Yang, and Zhou
 
@@ -182,6 +183,11 @@ def rankingTest():
         print [nodes[i] for i in mlbRanking]
         print evaluation
         print ""
+
+    synthGraph = syntheticgraph.generateSyntheticGraph(1000, alpha = 0.8)
+    synthRanking = ranking(synthGraph)
+    evaluation = rankingEvaluation(synthGraph, synthRanking)
+    print evaluation
 
 if __name__ == "__main__":
     rankingTest()
