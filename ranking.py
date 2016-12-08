@@ -1,14 +1,30 @@
 import snap
 import random
 
-def ranking(graph, alpha):
+def randomShuffle(nodes, graph, edgeAttrs):
+    random.shuffle(nodes)
+    return nodes
+
+def winLossSpread(nodes, graph, edgeAttrs):
+    diffs = { node : 0 for node in nodes }
+    for node in nodes:
+        winningEdges = [ edge for edge in edgeAttrs if edge[1] == node]
+        losingEdges = [ edge for edge in edgeAttrs if edge[0] == node]
+        for edge in winningEdges:
+            diffs[node] += edgeAttrs[edge]
+        for edge in losingEdges:
+            diffs[node] -= edgeAttrs[edge]
+    return sorted(diffs, key=lambda nodeID: diffs[nodeID], reverse=True)
+
+def ranking(graph, alpha, tiebreaker=randomShuffle, edgeAttrs=None):
     """
     Implements the node ranking algorithm described by Guo, Yang, and Zhou
 
     Args:
         graph (snap.TNGraph): a directed graph to rank
         alpha (float): the relative size of the leader partition
-
+        tiebreaker ((nodes, graph, edgeAttrs) -> nodes): a tiebreaking function for nodes
+            with the same degree difference
     Returns:
         A list of node IDs ordered in descending order by ranking
     """
@@ -26,8 +42,7 @@ def ranking(graph, alpha):
     # are randomly ordered
     nodeOrdering = []
     for key in sorted(degDiffs.keys(), reverse=True):
-        random.shuffle(degDiffs[key])
-        nodeOrdering += degDiffs[key]
+        nodeOrdering += tiebreaker(degDiffs[key], graph, edgeAttrs)
 
     # Split the nodes in leaders and followers
     splitIndex = int(alpha * graph.GetNodes())
@@ -52,7 +67,8 @@ def ranking(graph, alpha):
     followerGraph = snap.GetSubGraph(graph, followerNIdVector)
 
     # Recurse on the leaders and followers
-    return ranking(leaderGraph, alpha) + ranking(followerGraph, alpha)
+    return ranking(leaderGraph, alpha, tiebreaker, edgeAttrs) + ranking(followerGraph, alpha, tiebreaker, edgeAttrs)
+
 
 def rankingEvaluation(graph, ranking):
     """
@@ -91,7 +107,6 @@ def rankingTest():
 
     testGraph.AddEdge(7, 8)
     testGraph.AddEdge(6, 7)
-    testGraph.AddEdge(6, 5)
     testGraph.AddEdge(5, 7)
     testGraph.AddEdge(0, 5)
     testGraph.AddEdge(1, 5)
@@ -102,41 +117,82 @@ def rankingTest():
     testGraph.AddEdge(3, 6)
     testGraph.AddEdge(4, 6)
 
+    edgeDict = {}
+    edgeDict[(7, 8)] = 1
+    edgeDict[(6, 7)] = 1
+    edgeDict[(5, 7)] = 1
+    edgeDict[(0, 5)] = 5
+    edgeDict[(1, 5)] = 5
+    edgeDict[(2, 5)] = 5
+    edgeDict[(3, 5)] = 5
+    edgeDict[(1, 6)] = 5
+    edgeDict[(2, 6)] = 5
+    edgeDict[(3, 6)] = 5
+    edgeDict[(4, 6)] = 5
+
     nodeRanking = ranking(testGraph, 0.6)
-    print "Toy graph results"
+    print "Toy graph results (random)"
+    print "================="
+    print nodeRanking
+    print rankingEvaluation(testGraph, nodeRanking)
+
+    nodeRanking = ranking(testGraph, 0.6, winLossSpread, edgeDict)
+    print "Toy graph results (win/loss spread)"
     print "================="
     print nodeRanking
     print rankingEvaluation(testGraph, nodeRanking)
 
     import process_mlb
-    mlbGraph = snap.TNEANet.New()
+    mlbGraph = snap.TNGraph.New()
     (nodes, edgeDict) = process_mlb.read_folder('data/mlb/2015')
+    #print nodes
+    #print [ game for game in edgeDict if game[0] == "OAK" or game[1] == "OAK" ]
+    print edgeDict
 
     for i in range(len(nodes)):
         mlbGraph.AddNode(i)
 
-    print edgeDict
+    modifiedEdgeDict = {}
     for edge in edgeDict:
         if edgeDict[edge] > 0:
             # the first team in the edge won the series, so create edge second -> first
             srcNodeID = nodes.index(edge[1])
             dstNodeID = nodes.index(edge[0])
             mlbGraph.AddEdge(srcNodeID, dstNodeID)
+            modifiedEdgeDict[(srcNodeID, dstNodeID)] = edgeDict[edge]
 
         elif edgeDict[edge] < 0:
             # the second team in the edge won the series, so create edge first -> second
             srcNodeID = nodes.index(edge[0])
             dstNodeID = nodes.index(edge[1])
             mlbGraph.AddEdge(srcNodeID, dstNodeID)
-
-    mlbRanking = ranking(mlbGraph, 0.6)
-    evaluation = rankingEvaluation(mlbGraph, mlbRanking)
+            modifiedEdgeDict[(srcNodeID, dstNodeID)] = -1 * edgeDict[edge]
+    #print modifiedEdgeDict
 
     print ""
-    print "MLB graph results"
+    print "MLB graph results (random)"
     print "================="
-    print [nodes[i] for i in mlbRanking]
-    print evaluation
+    for alpha10 in range(1, 10):
+        alpha = alpha10 * 0.1
+        print "alpha:", alpha
+        mlbRanking = ranking(mlbGraph, alpha)
+        evaluation = rankingEvaluation(mlbGraph, mlbRanking)
+
+        print [nodes[i] for i in mlbRanking]
+        print evaluation
+        print ""
+
+    print "MLB graph results (win/loss tiebreak)"
+    print "================="
+    for alpha10 in range(1, 10):
+        alpha = alpha10 * 0.1
+        print "alpha:", alpha
+        mlbRanking = ranking(mlbGraph, alpha, winLossSpread, modifiedEdgeDict)
+        evaluation = rankingEvaluation(mlbGraph, mlbRanking)
+
+        print [nodes[i] for i in mlbRanking]
+        print evaluation
+        print ""
 
 if __name__ == "__main__":
     rankingTest()
