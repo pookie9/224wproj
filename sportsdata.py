@@ -1,6 +1,9 @@
 import mlbgame
 import nflgame
 
+mlbGames = {}
+nflGames = {}
+
 def getMLBEdges(start, end, gamma=0.8):
     """
     Generates a dictionary of (team1, team2) -> wl_spread where
@@ -20,7 +23,11 @@ def getMLBEdges(start, end, gamma=0.8):
     edges = {}
     teams = { team.club_common_name : team.club.upper() for team in mlbgame.teams() }
     for year in range(start, end + 1):
-        games = mlbgame.combine_games(mlbgame.games(year))
+        if year not in mlbGames:
+            games = mlbgame.combine_games(mlbgame.games(year))
+            mlbGames[year] = games
+        else:
+            games = mlbGames[year]
         discount = gamma**(end - year)
         for game in games:
             try:
@@ -54,7 +61,11 @@ def getNFLEdges(start, end, gamma=0.8):
     edges = {}
     teams = [ team[0] for team in nflgame.teams ]
     for year in range(start, end + 1):
-        games = nflgame.games(year)
+        if year not in nflGames:
+            games = nflgame.games(year)
+            nflGames[year] = games
+        else:
+            games = nflGames[year]
         discount = gamma**(end - year)
         for game in games:
             try:
