@@ -18,7 +18,7 @@ def getMLBEdges(start, end, gamma=0.8):
     """
 
     edges = {}
-    teams = [ team.club_common_name for team in mlbgame.teams() ]
+    teams = { team.club_common_name : team.club.upper() for team in mlbgame.teams() }
     for year in range(start, end + 1):
         games = mlbgame.combine_games(mlbgame.games(year))
         discount = gamma**(end - year)
@@ -26,12 +26,14 @@ def getMLBEdges(start, end, gamma=0.8):
             try:
                 # Some game data is with teams not in the MLB, some games don't have winners, so check for that
                 if game.w_team in teams and game.l_team in teams:
-                    edges[(game.w_team, game.l_team)] = edges.get((game.w_team, game.l_team), 0.0) + 1 * discount
-                    edges[(game.l_team, game.w_team)] = edges.get((game.l_team, game.w_team), 0.0) - 1 * discount
+                    winner = teams[game.w_team]
+                    loser = teams[game.l_team]
+                    edges[(winner, loser)] = edges.get((winner, loser), 0.0) + 1 * discount
+                    edges[(loser, winner)] = edges.get((loser, winner), 0.0) - 1 * discount
             except AttributeError:
                 pass
         
-    return teams, edges
+    return teams.values(), edges
 
 def getNFLEdges(start, end, gamma=0.8):
     """
