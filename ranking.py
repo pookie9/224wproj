@@ -1,5 +1,6 @@
 import snap
 import process_mlb
+import sportsdata
 import random
 import syntheticgraph
 
@@ -145,7 +146,8 @@ def rankingTest():
     print rankingEvaluation(testGraph, nodeRanking)
 
     mlbGraph = snap.TNGraph.New()
-    (nodes, edgeDict) = process_mlb.read_folder('data/mlb/2015')
+    (nodes, edgeDict) = sportsdata.getMLBEdges(2015, 2015, 1)
+    print edgeDict
     #print nodes
     #print [ game for game in edgeDict if game[0] == "OAK" or game[1] == "OAK" ]
 
@@ -181,6 +183,47 @@ def rankingTest():
         evaluation = rankingEvaluation(mlbGraph, mlbRanking)
 
         print [nodes[i] for i in mlbRanking]
+        print evaluation
+        print ""
+
+    nflGraph = snap.TNGraph.New()
+    (nodes, edgeDict) = sportsdata.getNFLEdges(2015, 2015, 1)
+    print edgeDict
+    #print nodes
+    #print [ game for game in edgeDict if game[0] == "OAK" or game[1] == "OAK" ]
+
+    for i in range(len(nodes)):
+        nflGraph.AddNode(i)
+
+    # Take only the edges with positive weight, representing team1 beating team2
+    edgeDict = { edge : edgeDict[edge] for edge in edgeDict if edgeDict[edge] > 0}
+    for edge in edgeDict:
+        srcNodeID = nodes.index(edge[1])
+        dstNodeID = nodes.index(edge[0])
+        nflGraph.AddEdge(srcNodeID, dstNodeID)
+
+    print ""
+    print "NFL graph results (random)"
+    print "================="
+    for alpha10 in range(1, 10):
+        alpha = alpha10 * 0.1
+        print "alpha:", alpha
+        nflRanking = ranking(nflGraph, alpha)
+        evaluation = rankingEvaluation(nflGraph, nflRanking)
+
+        print [nodes[i] for i in nflRanking]
+        print evaluation
+        print ""
+
+    print "NFL graph results (win/loss tiebreak)"
+    print "================="
+    for alpha10 in range(1, 10):
+        alpha = alpha10 * 0.1
+        print "alpha:", alpha
+        nflRanking = ranking(nflGraph, alpha, winLossSpread, edgeDict)
+        evaluation = rankingEvaluation(nflGraph, nflRanking)
+
+        print [nodes[i] for i in nflRanking]
         print evaluation
         print ""
 
