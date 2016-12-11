@@ -4,48 +4,45 @@ import sportsdata
 import random
 import syntheticgraph
 
-def randomShuffle(nodes, graph, edgeAttrs):
-    random.shuffle(nodes)
-    return nodes
+MLB_2015_STANDINGS = ['STL', 'PIT', 'CHC', 'KC', 'TOR', 'LA', 'NYM', 'TEX', 'NYY', 'HOU', 'ANA', 'SF', 'WAS', 'MIN', 'CLE', 'BAL', 'TB', 'ARI', 'BOS', 'SEA', 'CWS', 'DET', 'SD', 'MIA', 'MIL', 'OAK', 'COL', 'ATL', 'CIN', 'PHI']
+NFL_2015_STANDINGS = ['CAR', 'DEN', 'SEA', 'ARI', 'NE', 'CIN', 'PIT', 'KC', 'MIN', 'GB', 'WAS', 'NYJ', 'HOU', 'BUF', 'ATL', 'OAK', 'IND', 'PHI', 'NO', 'DET', 'MIA', 'STL', 'NYG', 'TB', 'CHI', 'BAL', 'JAC', 'SD', 'SF', 'DAL', 'TEN', 'CLE']
 
-def winLossSpread(nodes, graph, edgeAttrs):
-    diffs = { node : 0 for node in nodes }
-    for node in nodes:
-        winningEdges = [ edge for edge in edgeAttrs if edge[1] == node]
-        losingEdges = [ edge for edge in edgeAttrs if edge[0] == node]
-        for edge in winningEdges:
-            diffs[node] += edgeAttrs[edge]
-        for edge in losingEdges:
-            diffs[node] -= edgeAttrs[edge]
-    return sorted(diffs, key=lambda nodeID: diffs[nodeID], reverse=True)
+def randomValue(nodeID, graph, edgeAttrs):
+    return random.random()
 
-def ranking(graph, alpha=0.6, tiebreaker=randomShuffle, edgeAttrs=None):
+def degreeDifference(nodeID, graph, edgeAttrs):
+    node = graph.GetNI(nodeID)
+    return node.GetInDeg() - node.GetOutDeg()
+
+def edgeWeightDifference(nodeID, graph, edgeAttrs):
+    diff = 0
+    node = graph.GetNI(nodeID)
+    for edgeID in node.GetInEdges():
+        diff += edgeAttrs[(nodeID, edgeID)]
+
+    for edgeID in node.GetOutEdges():
+        diff -= edgeAttrs[(edgeID, nodeID)]
+
+    return diff
+
+def ranking(graph, alpha=0.6, primary=degreeDifference, secondary=randomValue, edgeAttrs=None):
     """
     Implements the node ranking algorithm described by Guo, Yang, and Zhou
 
     Args:
         graph (snap.TNGraph): a directed graph to rank
         alpha (float): the relative size of the leader partition
-        tiebreaker ((nodes, graph, edgeAttrs) -> nodes): a tiebreaking function for nodes
-            with the same degree difference
+        primary ((nodeID, graph, edgeAttrs) -> int): sorting key for primary sorting of the nodes
+        secondary ((nodes, graph, edgeAttrs) -> nodes): sorting key for secondary sorting of nodes
+        edgeAttrs (dict): edge attributes for use with sorting key functions
     Returns:
         A list of node IDs ordered in descending order by ranking
     """
     
     # Group the nodes by degree difference (d_in - d_out)
-    degDiffs = {}
-    for node in graph.Nodes():
-        degDiff = node.GetInDeg() - node.GetOutDeg()
-        if degDiff in degDiffs:
-            degDiffs[degDiff] += [node.GetId()]
-        else:
-            degDiffs[degDiff] = [node.GetId()]
-
-    # Generate a descending ordering where nodes with same degree difference
-    # are randomly ordered
-    nodeOrdering = []
-    for key in sorted(degDiffs.keys(), reverse=True):
-        nodeOrdering += tiebreaker(degDiffs[key], graph, edgeAttrs)
+    nodeOrdering = sorted([ node.GetId() for node in graph.Nodes()], key=lambda nodeID:
+                            (primary(nodeID, graph, edgeAttrs), secondary(nodeID, graph, edgeAttrs)),
+                            reverse=True)
 
     # Split the nodes in leaders and followers
     splitIndex = int(alpha * graph.GetNodes())
@@ -70,10 +67,9 @@ def ranking(graph, alpha=0.6, tiebreaker=randomShuffle, edgeAttrs=None):
     followerGraph = snap.GetSubGraph(graph, followerNIdVector)
 
     # Recurse on the leaders and followers
-    return ranking(leaderGraph, alpha, tiebreaker, edgeAttrs) + ranking(followerGraph, alpha, tiebreaker, edgeAttrs)
+    return ranking(leaderGraph, alpha, primary, secondary, edgeAttrs) + ranking(followerGraph, alpha, primary, secondary, edgeAttrs)
 
-
-def rankingEvaluation(graph, ranking):
+def graphRankingEvaluation(graph, ranking):
     """
     Evaluates the accuracy of the ranking within the graph. An edge is
     considered accurately predicted if the ranking of its destination is
@@ -103,134 +99,288 @@ def rankingEvaluation(graph, ranking):
 
     return correctCount * 1.0 / graph.GetEdges()
 
+def gameRankingEvaluation(games, ranking):
+    """
+    Evaluates the accuracy of the ranking against a list of games. A game is
+    considered accurately predicted if the winner is ranked higher than the loser.
+    The accuracy is given by the number of accurate games divided by the total number
+    of games.
+
+    Args:
+        games (list): a list of games represented as tuples (loser, winner)
+        ranking (list): a ranking of the teams, ordered from high to low
+
+    Returns:
+        A float representing the proportion of accurately predicted games
+    """
+
+    # Generate a mapping of team to ranking for quick lookup
+    rankingMap = {}
+    for i in range(len(ranking)):
+        rankingMap[ranking[i]] = i
+
+    # Iterate through the games
+    correctCount = 0
+    for game in games:
+        try:
+            winnerIndex = rankingMap[game[0]]
+            loserIndex= rankingMap[game[1]]
+            if loserIndex > winnerIndex:
+                correctCount += 1
+        except:
+            pass
+    
+    return correctCount * 1.0 / len(games)
+
 def rankingTest():
-    testGraph = snap.TNGraph.New()
-    for i in range(9):
-        testGraph.AddNode(i)
+    """
+    Run analysis on the MLB and NFL graphs. For each league, we:
+        1) Generate our own ranking for 2015
+        2) Determine how accurately our ranking reflects 2015 games
+        3) Determine how accurately the actual ranking reflects 2015 games
+        4) Calculate the Levenshtein (edit) distance between 2015 rankings
+        5) Generate a ranking for 2012-2014 data
+        6) Determine how accurately our historical ranking reflects 2015 games
+    """
+    # Results for 2015 MLB data
+    randomResults = []
+    edgeWeightPrimaryResults = []
+    edgeWeightSecondaryResults = []
 
-    testGraph.AddEdge(7, 8)
-    testGraph.AddEdge(6, 7)
-    testGraph.AddEdge(5, 7)
-    testGraph.AddEdge(0, 5)
-    testGraph.AddEdge(1, 5)
-    testGraph.AddEdge(2, 5)
-    testGraph.AddEdge(3, 5)
-    testGraph.AddEdge(1, 6)
-    testGraph.AddEdge(2, 6)
-    testGraph.AddEdge(3, 6)
-    testGraph.AddEdge(4, 6)
+    teams, edgeWeights = sportsdata.getMLBEdges(2015, 2015)
+    edgeWeights = { edge : weight for edge, weight in edgeWeights.items() if weight > 0 } 
+    currentGraph = createGraph(teams, edgeWeights)
+    games = sportsdata.getMLBGames(2015)
+    edgeWeights = { (teams.index(edge[0]), teams.index(edge[1])) : weight for edge, weight in edgeWeights.items() }
+    for alpha in [ j * 0.1 for j in range(1, 10) ]:
+        randomRanking = [ teams[i] for i in ranking(currentGraph, alpha) ]
+        edgeWeightPrimaryRanking = [ teams[i] for i in ranking(currentGraph, alpha, edgeWeightDifference, randomValue, edgeWeights) ]
+        edgeWeightSecondaryRanking = [ teams[i] for i in ranking(currentGraph, alpha, degreeDifference, edgeWeightDifference, edgeWeights) ]
 
-    edgeDict = {}
-    edgeDict[(7, 8)] = 1
-    edgeDict[(6, 7)] = 1
-    edgeDict[(5, 7)] = 1
-    edgeDict[(0, 5)] = 5
-    edgeDict[(1, 5)] = 5
-    edgeDict[(2, 5)] = 5
-    edgeDict[(3, 5)] = 5
-    edgeDict[(1, 6)] = 5
-    edgeDict[(2, 6)] = 5
-    edgeDict[(3, 6)] = 5
-    edgeDict[(4, 6)] = 5
+        randomAccuracy = gameRankingEvaluation(games, randomRanking)
+        edgeWeightPrimaryAccuracy = gameRankingEvaluation(games, edgeWeightPrimaryRanking)
+        edgeWeightSecondaryAccuracy = gameRankingEvaluation(games, edgeWeightSecondaryRanking)
 
-    nodeRanking = ranking(testGraph, 0.6)
-    print "Toy graph results (random)"
-    print "================="
-    print nodeRanking
-    print rankingEvaluation(testGraph, nodeRanking)
+        randomDistance = levenshtein(randomRanking, MLB_2015_STANDINGS)
+        edgeWeightPrimaryDistance = levenshtein(edgeWeightPrimaryRanking, MLB_2015_STANDINGS)
+        edgeWeightSecondaryDistance = levenshtein(edgeWeightSecondaryRanking, MLB_2015_STANDINGS)
 
-    nodeRanking = ranking(testGraph, 0.6, winLossSpread, edgeDict)
-    print "Toy graph results (win/loss spread)"
-    print "================="
-    print nodeRanking
-    print rankingEvaluation(testGraph, nodeRanking)
+        randomResults.append((alpha, randomRanking, randomAccuracy, randomDistance))
+        edgeWeightPrimaryResults.append((alpha, edgeWeightPrimaryRanking, edgeWeightPrimaryAccuracy, edgeWeightPrimaryDistance))
+        edgeWeightSecondaryResults.append((alpha, edgeWeightSecondaryRanking, edgeWeightSecondaryAccuracy, edgeWeightSecondaryDistance))
 
-    mlbGraph = snap.TNGraph.New()
-    (nodes, edgeDict) = sportsdata.getMLBEdges(2015, 2015, 1)
-    print edgeDict
-    #print nodes
-    #print [ game for game in edgeDict if game[0] == "OAK" or game[1] == "OAK" ]
+    randomOptimal = max(randomResults, key=lambda result: result[2])
+    edgeWeightPrimaryOptimal = max(edgeWeightPrimaryResults, key=lambda result: result[2])
+    edgeWeightSecondaryOptimal = max(edgeWeightSecondaryResults, key=lambda result: result[2])
 
-    for i in range(len(nodes)):
-        mlbGraph.AddNode(i)
+    # Predicting with 2012-2014 data
+    randomResults = []
+    edgeWeightPrimaryResults = []
+    edgeWeightSecondaryResults = []
+    for gamma in [ i * 0.1 for i in range(0, 11) ]:
+        (teams, edgeWeights) = sportsdata.getMLBEdges(2012, 2014, gamma)
+        edgeWeights = { edge : weight for edge, weight in edgeWeights.items() if weight > 0 } 
+        historicalGraph = createGraph(teams, edgeWeights)
+        edgeWeights = { (teams.index(edge[0]), teams.index(edge[1])) : weight for edge, weight in edgeWeights.items() }
+        for alpha in [ j * 0.1 for j in range(1, 10) ]:
+            randomRanking = [ teams[i] for i in ranking(historicalGraph, alpha) ]
+            edgeWeightPrimaryRanking = [ teams[i] for i in ranking(historicalGraph, alpha, edgeWeightDifference, randomValue, edgeWeights) ]
+            edgeWeightSecondaryRanking = [ teams[i] for i in ranking(historicalGraph, alpha, degreeDifference, edgeWeightDifference, edgeWeights) ]
 
-    # Take only the edges with positive weight, representing team1 beating team2
-    edgeDict = { edge : edgeDict[edge] for edge in edgeDict if edgeDict[edge] > 0}
-    for edge in edgeDict:
-        srcNodeID = nodes.index(edge[1])
-        dstNodeID = nodes.index(edge[0])
-        mlbGraph.AddEdge(srcNodeID, dstNodeID)
+            randomAccuracy = gameRankingEvaluation(games, randomRanking)
+            edgeWeightPrimaryAccuracy = gameRankingEvaluation(games, edgeWeightPrimaryRanking)
+            edgeWeightSecondaryAccuracy = gameRankingEvaluation(games, edgeWeightSecondaryRanking)
+
+            randomDistance = levenshtein(randomRanking, MLB_2015_STANDINGS)
+            edgeWeightPrimaryDistance = levenshtein(edgeWeightPrimaryRanking, MLB_2015_STANDINGS)
+            edgeWeightSecondaryDistance = levenshtein(edgeWeightSecondaryRanking, MLB_2015_STANDINGS)
+
+            randomResults.append((gamma, alpha, randomRanking, randomAccuracy, randomDistance))
+            edgeWeightPrimaryResults.append((gamma, alpha, edgeWeightPrimaryRanking, edgeWeightPrimaryAccuracy, edgeWeightPrimaryDistance))
+            edgeWeightSecondaryResults.append((gamma, alpha, edgeWeightSecondaryRanking, edgeWeightSecondaryAccuracy, edgeWeightSecondaryDistance))
+
+    histRandomOptimal = max(randomResults, key=lambda result: result[3])
+    histEdgeWeightPrimaryOptimal = max(edgeWeightPrimaryResults, key=lambda result: result[3])
+    histEdgeWeightSecondaryOptimal = max(edgeWeightSecondaryResults, key=lambda result: result[3])
+
+    print "MLB Results"
+    print "==========="
+    print "DR", randomOptimal
+    print "EWR", edgeWeightPrimaryOptimal
+    print "DEW", edgeWeightSecondaryOptimal
+    print "Actual ranking", gameRankingEvaluation(games, MLB_2015_STANDINGS)
+    print "Historical DR", histRandomOptimal
+    print "Historical EWR", histEdgeWeightPrimaryOptimal
+    print "Historical DEW", histEdgeWeightSecondaryOptimal
+
+    randomResults = []
+    edgeWeightPrimaryResults = []
+    edgeWeightSecondaryResults = []
+
+    teams, edgeWeights = sportsdata.getNFLEdges(2015, 2015)
+    edgeWeights = { edge : weight for edge, weight in edgeWeights.items() if weight > 0 } 
+    currentGraph = createGraph(teams, edgeWeights)
+    games = sportsdata.getNFLGames(2015)
+    edgeWeights = { (teams.index(edge[0]), teams.index(edge[1])) : weight for edge, weight in edgeWeights.items() }
+    for alpha in [ j * 0.1 for j in range(1, 10) ]:
+        randomRanking = [ teams[i] for i in ranking(currentGraph, alpha) ]
+        edgeWeightPrimaryRanking = [ teams[i] for i in ranking(currentGraph, alpha, edgeWeightDifference, randomValue, edgeWeights) ]
+        edgeWeightSecondaryRanking = [ teams[i] for i in ranking(currentGraph, alpha, degreeDifference, edgeWeightDifference, edgeWeights) ]
+
+        randomAccuracy = gameRankingEvaluation(games, randomRanking)
+        edgeWeightPrimaryAccuracy = gameRankingEvaluation(games, edgeWeightPrimaryRanking)
+        edgeWeightSecondaryAccuracy = gameRankingEvaluation(games, edgeWeightSecondaryRanking)
+
+        randomDistance = levenshtein(randomRanking, MLB_2015_STANDINGS)
+        edgeWeightPrimaryDistance = levenshtein(edgeWeightPrimaryRanking, MLB_2015_STANDINGS)
+        edgeWeightSecondaryDistance = levenshtein(edgeWeightSecondaryRanking, MLB_2015_STANDINGS)
+
+        randomResults.append((alpha, randomRanking, randomAccuracy, randomDistance))
+        edgeWeightPrimaryResults.append((alpha, edgeWeightPrimaryRanking, edgeWeightPrimaryAccuracy, edgeWeightPrimaryDistance))
+        edgeWeightSecondaryResults.append((alpha, edgeWeightSecondaryRanking, edgeWeightSecondaryAccuracy, edgeWeightSecondaryDistance))
+
+    randomOptimal = max(randomResults, key=lambda result: result[2])
+    edgeWeightPrimaryOptimal = max(edgeWeightPrimaryResults, key=lambda result: result[2])
+    edgeWeightSecondaryOptimal = max(edgeWeightSecondaryResults, key=lambda result: result[2])
+
+    # Predicting with 2012-2014 data
+    randomResults = []
+    edgeWeightPrimaryResults = []
+    edgeWeightSecondaryResults = []
+    for gamma in [ i * 0.1 for i in range(0, 11) ]:
+        (teams, edgeWeights) = sportsdata.getNFLEdges(2012, 2014, gamma)
+        edgeWeights = { edge : weight for edge, weight in edgeWeights.items() if weight > 0 } 
+        historicalGraph = createGraph(teams, edgeWeights)
+        edgeWeights = { (teams.index(edge[0]), teams.index(edge[1])) : weight for edge, weight in edgeWeights.items() }
+        for alpha in [ j * 0.1 for j in range(1, 10) ]:
+            randomRanking = [ teams[i] for i in ranking(historicalGraph, alpha) ]
+            edgeWeightPrimaryRanking = [ teams[i] for i in ranking(historicalGraph, alpha, edgeWeightDifference, randomValue, edgeWeights) ]
+            edgeWeightSecondaryRanking = [ teams[i] for i in ranking(historicalGraph, alpha, degreeDifference, edgeWeightDifference, edgeWeights) ]
+
+            randomAccuracy = gameRankingEvaluation(games, randomRanking)
+            edgeWeightPrimaryAccuracy = gameRankingEvaluation(games, edgeWeightPrimaryRanking)
+            edgeWeightSecondaryAccuracy = gameRankingEvaluation(games, edgeWeightSecondaryRanking)
+
+            randomDistance = levenshtein(randomRanking, NFL_2015_STANDINGS)
+            edgeWeightPrimaryDistance = levenshtein(edgeWeightPrimaryRanking, NFL_2015_STANDINGS)
+            edgeWeightSecondaryDistance = levenshtein(edgeWeightSecondaryRanking, NFL_2015_STANDINGS)
+
+            randomResults.append((gamma, alpha, randomRanking, randomAccuracy, randomDistance))
+            edgeWeightPrimaryResults.append((gamma, alpha, edgeWeightPrimaryRanking, edgeWeightPrimaryAccuracy, edgeWeightPrimaryDistance))
+            edgeWeightSecondaryResults.append((gamma, alpha, edgeWeightSecondaryRanking, edgeWeightSecondaryAccuracy, edgeWeightSecondaryDistance))
+
+    histRandomOptimal = max(randomResults, key=lambda result: result[3])
+    histEdgeWeightPrimaryOptimal = max(edgeWeightPrimaryResults, key=lambda result: result[3])
+    histEdgeWeightSecondaryOptimal = max(edgeWeightSecondaryResults, key=lambda result: result[3])
+
+    print "NFL Results"
+    print "==========="
+    print "DR", randomOptimal
+    print "EWR", edgeWeightPrimaryOptimal
+    print "DEW", edgeWeightSecondaryOptimal
+    print "Actual ranking", gameRankingEvaluation(games, NFL_2015_STANDINGS)
+    print "Historical DR", histRandomOptimal
+    print "Historical EWR", histEdgeWeightPrimaryOptimal
+    print "Historical DEW", histEdgeWeightSecondaryOptimal
+
+    """
+    (teams, edgeDict) = sportsdata.getMLBEdges(2015, 2015)
+    currentMLBGraph = createGraph(teams, edgeDict)
+
+    mlbRandomResults = []
+    mlbWinLossResults = []
+    for gamma in [ i * 0.1 for i in range(0, 11) ]:
+        (teams, edgeDict) = sportsdata.getMLBEdges(2012, 2014, gamma)
+        mlbHistoricalGraph = createGraph(teams, edgeDict)
+        for alpha in [ j * 0.1 for j in range(1, 10) ]:
+            mlbRanking = ranking(mlbHistoricalGraph, alpha)
+            historicalEval = rankingEvaluation(mlbHistoricalGraph, mlbRanking)
+            currentEval = rankingEvaluation(currentMLBGraph, mlbRanking)
+            mlbRandomResults.append((gamma, alpha, mlbRanking, historicalEval, currentEval))
+
+            mlbRanking = ranking(mlbHistoricalGraph, alpha, edgeWeightSecondarySpread, edgeDict)
+            historicalEval = rankingEvaluation(mlbHistoricalGraph, mlbRanking)
+            currentEval = rankingEvaluation(currentMLBGraph, mlbRanking)
+            mlbWinLossResults.append((gamma, alpha, mlbRanking, historicalEval, currentEval))
+
+    randomMax = max(mlbRandomResults, key=lambda x: x[4])
+    edgeWeightSecondaryMax = max(mlbWinLossResults, key=lambda x: x[4])
+    print "MLB Results"
+    print "==============="
+    print randomMax
+    print edgeWeightSecondaryMax
+            
+    (teams, edgeDict) = sportsdata.getNFLEdges(2015, 2015)
+    currentNFLGraph = createGraph(teams, edgeDict)
+
+    nflRandomResults = []
+    nflWinLossResults = []
+    for gamma in [ i * 0.1 for i in range(0, 11) ]:
+        (teams, edgeDict) = sportsdata.getNFLEdges(2012, 2014, gamma)
+        nflHistoricalGraph = createGraph(teams, edgeDict)
+        for alpha in [ j * 0.1 for j in range(1, 10) ]:
+            nflRanking = ranking(nflHistoricalGraph, alpha)
+            historicalEval = rankingEvaluation(nflHistoricalGraph, nflRanking)
+            currentEval = rankingEvaluation(currentNFLGraph, nflRanking)
+            nflRandomResults.append((gamma, alpha, nflRanking, historicalEval, currentEval))
+
+            nflRanking = ranking(nflHistoricalGraph, alpha, edgeWeightSecondarySpread, edgeDict)
+            historicalEval = rankingEvaluation(nflHistoricalGraph, nflRanking)
+            currentEval = rankingEvaluation(currentNFLGraph, nflRanking)
+            nflWinLossResults.append((gamma, alpha, nflRanking, historicalEval, currentEval))
+
+    randomMax = max(nflRandomResults, key=lambda x: x[4])
+    edgeWeightSecondaryMax = max(nflWinLossResults, key=lambda x: x[4])
+    print ""
+    print "NFL Results"
+    print "==============="
+    print randomMax
+    print edgeWeightSecondaryMax
 
     print ""
-    print "MLB graph results (random)"
-    print "================="
-    for alpha10 in range(1, 10):
-        alpha = alpha10 * 0.1
-        print "alpha:", alpha
-        mlbRanking = ranking(mlbGraph, alpha)
-        evaluation = rankingEvaluation(mlbGraph, mlbRanking)
-
-        print [nodes[i] for i in mlbRanking]
-        print evaluation
-        print ""
-
-    print "MLB graph results (win/loss tiebreak)"
-    print "================="
-    for alpha10 in range(1, 10):
-        alpha = alpha10 * 0.1
-        print "alpha:", alpha
-        mlbRanking = ranking(mlbGraph, alpha, winLossSpread, edgeDict)
-        evaluation = rankingEvaluation(mlbGraph, mlbRanking)
-
-        print [nodes[i] for i in mlbRanking]
-        print evaluation
-        print ""
-
-    nflGraph = snap.TNGraph.New()
-    (nodes, edgeDict) = sportsdata.getNFLEdges(2015, 2015, 1)
-    print edgeDict
-    #print nodes
-    #print [ game for game in edgeDict if game[0] == "OAK" or game[1] == "OAK" ]
-
-    for i in range(len(nodes)):
-        nflGraph.AddNode(i)
-
-    # Take only the edges with positive weight, representing team1 beating team2
-    edgeDict = { edge : edgeDict[edge] for edge in edgeDict if edgeDict[edge] > 0}
-    for edge in edgeDict:
-        srcNodeID = nodes.index(edge[1])
-        dstNodeID = nodes.index(edge[0])
-        nflGraph.AddEdge(srcNodeID, dstNodeID)
-
-    print ""
-    print "NFL graph results (random)"
-    print "================="
-    for alpha10 in range(1, 10):
-        alpha = alpha10 * 0.1
-        print "alpha:", alpha
-        nflRanking = ranking(nflGraph, alpha)
-        evaluation = rankingEvaluation(nflGraph, nflRanking)
-
-        print [nodes[i] for i in nflRanking]
-        print evaluation
-        print ""
-
-    print "NFL graph results (win/loss tiebreak)"
-    print "================="
-    for alpha10 in range(1, 10):
-        alpha = alpha10 * 0.1
-        print "alpha:", alpha
-        nflRanking = ranking(nflGraph, alpha, winLossSpread, edgeDict)
-        evaluation = rankingEvaluation(nflGraph, nflRanking)
-
-        print [nodes[i] for i in nflRanking]
-        print evaluation
-        print ""
-
-    synthGraph = syntheticgraph.generateSyntheticGraph(1000, alpha = 0.8)
-    synthRanking = ranking(synthGraph)
-    evaluation = rankingEvaluation(synthGraph, synthRanking)
+    print "Synthetic graph"
+    print "==============="
+    historicalSynthGraph = syntheticgraph.generateSyntheticGraph(1000, alpha = 0.25)
+    currentSynthGraph = syntheticgraph.generateSyntheticGraph(1000, alpha = 0.25)
+    synthRanking = ranking(historicalSynthGraph)
+    evaluation = rankingEvaluation(currentSynthGraph, synthRanking)
     print evaluation
+    print rankingEvaluation(historicalSynthGraph, range(1000))
+    """
+
+def createGraph(nodes, edgeDict):
+    graph = snap.TNGraph.New()
+    for i in range(len(nodes)):
+        graph.AddNode(i)
+
+    for edge in edgeDict:
+        srcNodeID = nodes.index(edge[1])
+        dstNodeID = nodes.index(edge[0])
+        graph.AddEdge(srcNodeID, dstNodeID)
+
+    return graph
+
+def levenshtein(a,b):
+    """
+    Calculates the Levenshtein distance between a and b.
+    """
+    n, m = len(a), len(b)
+    if n > m:
+        # Make sure n <= m, to use O(min(n,m)) space
+        a,b = b,a
+        n,m = m,n
+        
+    current = range(n+1)
+    for i in range(1,m+1):
+        previous, current = current, [i]+[0]*n
+        for j in range(1,n+1):
+            add, delete = previous[j]+1, current[j-1]+1
+            change = previous[j-1]
+            if a[j-1] != b[i-1]:
+                change = change + 1
+            current[j] = min(add, delete, change)
+            
+    return current[n]
 
 if __name__ == "__main__":
     rankingTest()
