@@ -17,8 +17,9 @@ def add(dict1, dict2):
 class Graph(object):
     
     #Edge list is a list of edges from winners to losers
-    def __init__(self, edge_list):
+    def __init__(self, edge_list,hits=False):
         self.edge_list={}#Maps ids to lists of neigbhors
+
         self.edge_weights={}#Maps tuples of (node1, node2) to True or False, True means node1 beat node2, False means node2 beat node1
         for edge in edge_list:
             if edge[0] not in self.edge_list:
@@ -29,8 +30,9 @@ class Graph(object):
             self.edge_list[edge[1]].append(edge[0])
             self.edge_weights[edge]=True
             self.edge_weights[(edge[1],edge[0])]=False
+        self.hits=None
+        attrs,labels=self.get_all_features(hits=hits)
         self.model=LogisticRegression()
-        attrs,labels=self.get_all_features()
         self.model.fit(attrs,labels)
     
     #Returns a dictionary of types of triads starting at node1, going to intermediarary, node2, and then node1 mapped to counts
@@ -58,22 +60,38 @@ class Graph(object):
         return triads
     
     #Returns a numpy array of features and labels, note that the ordering of the features is done by sorting the keys
-    def get_all_features(self):
-        attrs=np.zeros((0,4))
+    def get_all_features(self,hits=False):
+        if hits:
+            attrs=np.zeros((0,6))
+            if self.hits==None:
+                self.hits=HITS(self.edge_list.keys(),self.edge_list)
+        else:
+            attrs=np.zeros((0,4))
         labels=np.zeros((0))
         for node in self.edge_list:
             for neigh in self.edge_list[node]:
                 cur_attrs=sorted(self.get_partial_triads(node,neigh).items())
-                cur_attrs=np.array([item[1] for item in cur_attrs])
-                cur_attrs=cur_attrs.reshape((1,4))
+                if hits:
+                    cur_attrs=[item[1] for item in cur_attrs]
+                    cur_attrs.extend([self.hits[node],self.hits[neigh]])
+                    cur_attrs=np.array(cur_attrs).reshape((1,6))
+                else:
+                    cur_attrs=np.array([item[1] for item in cur_attrs])
+                    cur_attrs=cur_attrs.reshape((1,4))
                 attrs=np.append(attrs,cur_attrs,axis=0)
                 labels=np.append(labels,1*self.edge_weights[(node,neigh)])
         return attrs,labels
+
         
     def predict(self,node1,node2,model=None):
         cur_attrs=sorted(self.get_partial_triads(node1,node2).items())
-        cur_attrs=np.array([item[1] for item in cur_attrs])
-        cur_attrs=cur_attrs.reshape((1,4))
+        if self.hits:
+            cur_attrs=[item[1] for item in cur_attrs]
+            cur_attrs.extend([self.hits[node1],self.hits[node2]])
+            cur_attrs=np.array(cur_attrs).reshape((1,6))
+        else:
+            cur_attrs=np.array([item[1] for item in cur_attrs])
+            cur_attrs=cur_attrs.reshape((1,4))
         if model==None:
             return self.model.predict(cur_attrs)
         else:
@@ -93,11 +111,11 @@ def k_folds(edge_list,k=20):
         out.append((train,test))
     return out
         
-def eval_acc(edge_list,model=None):
+def eval_acc(edge_list,model=None,hits=False):
     folds=k_folds(edge_list)
     accs=[]
     for fold in folds:
-        g=Graph(fold[0])
+        g=Graph(fold[0],hits=hits)
         correct=0
         wrong=0
         for edge in fold[1]:
@@ -146,17 +164,29 @@ def nfl_edge_list(year):
             edge_list.append((str(game.winner),str(game.loser)))
     return edge_list
 
+def HITS(nodes,edge_list):
+    authorities={}
+    hubs={}
+    for node in nodes:
+        authorities[node]=1.0
+    for i in range(100):
+        total_auth=0.0
+        for node in edge_list:
+            authorities[node]+=sum([authorities[neigh] for neigh in edge_list[node]])
+            total_auth+=sum([authorities[neigh] for neigh in edge_list[node]])
+        for node in edge_list:
+            authorities[node]/=(total_auth**.5)
+    total=0.0
+    for node in edge_list:
+        total+=authorities[node]
+    for node in edge_list:
+        authorities[node]/=total/100
+    return authorities
+
+
 if __name__=='__main__':
 
-
-    """    teams = [ str(team[0]) for team in nflgame.teams ]
-    games=nflgame.games(2015)
-    edge_list=[]
-    for game in games:
-        if game.winner in teams and game.loser in teams:
-            edge_list.append((str(game.winner),str(game.loser)))
-    eval_acc(edge_list)"""
+    random.seed(10)
+    edge_list=mlb_edge_list(2015)    
+    eval_acc(edge_list,hits=True)
     
-    edge_list=nfl_edge_list(2010)
-    model=Graph(edge_list).model
-    eval_acc(mlb_edge_list(2015), model)
